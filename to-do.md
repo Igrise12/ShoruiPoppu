@@ -66,7 +66,7 @@ Implementation checklist based on the [project brief](docs/ShoruiPoppu_Project_B
 - [ ] Verify file-manager opening and single-instance forwarding on the target Linux desktop.
 - [ ] Check the MVP format set: PDF, DOCX, XLS/XLSX, PPTX, Markdown, CSV, and plain text.
 - [ ] Confirm the viewer remains read-only, minimal, and content-focused.
-- [ ] Confirm the public repository has a selected license and setup/contribution documentation before the first public release.
+- [x] Confirm the public repository has a selected license and setup/contribution documentation before the first public release.
 
 ## Later, based on need
 

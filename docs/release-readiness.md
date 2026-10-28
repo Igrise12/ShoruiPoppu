@@ -4,7 +4,7 @@
 
 - The release build produced a Debian bundle containing the executable and a desktop entry with all eight MVP MIME associations. A previous Hyprland check verified multiple-file GIO forwarding, including paths with spaces and non-Latin characters.
 - `npm run build`, `npm run test:pdf`, `npm run test:navigation`, `cargo check --manifest-path src-tauri/Cargo.toml`, and `cargo test --manifest-path src-tauri/Cargo.toml` passed. The PDF test must run after the build; simultaneous builds can replace its `dist` assets while it is running.
-- The local checkout has an MIT license and setup and contribution instructions. The GitHub repository is public but was empty when checked, so these files are not yet published.
+- The public GitHub repository contains the MIT license and setup and contribution instructions.
 - This session could not access native application windows. Dolphin and Nautilus Open With, visual rendering and navigation, and runtime file and network activity were not verified in this pass. Existing automated tests do not establish those results.
 
 ## Remaining Hyprland checks
