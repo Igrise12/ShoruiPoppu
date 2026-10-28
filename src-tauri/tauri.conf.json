@@ -1,0 +1,87 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ShoruiPoppu",
+  "version": "0.1.0",
+  "identifier": "io.github.igrise12.shoruipoppu",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; img-src 'self' asset: data:; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "deb"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "pdf"
+        ],
+        "mimeType": "application/pdf",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "docx"
+        ],
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "xls"
+        ],
+        "mimeType": "application/vnd.ms-excel",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "xlsx"
+        ],
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "pptx"
+        ],
+        "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "md"
+        ],
+        "mimeType": "text/markdown",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "csv"
+        ],
+        "mimeType": "text/csv",
+        "role": "Viewer"
+      },
+      {
+        "ext": [
+          "txt"
+        ],
+        "mimeType": "text/plain",
+        "role": "Viewer"
+      }
+    ],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "shoruipoppu.desktop"
+      }
+    }
+  }
+}

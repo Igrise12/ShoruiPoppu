@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "viewer",
+  "description": "Permissions for document viewer windows",
+  "windows": ["viewer-*"],
+  "permissions": ["core:default", "core:window:allow-close"]
+}

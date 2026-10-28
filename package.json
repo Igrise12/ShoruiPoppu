@@ -1,0 +1,23 @@
+{
+  "name": "shoruipoppu",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test:pdf": "node --test tests/pdf.test.mjs",
+    "test:navigation": "node --experimental-strip-types --test tests/navigation.test.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "typescript": "6.0.3",
+    "vite": "^7.3.7"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "pdfjs-dist": "^6.4.299"
+  }
+}
