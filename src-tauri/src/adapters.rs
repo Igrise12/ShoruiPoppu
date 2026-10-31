@@ -51,7 +51,7 @@ pub(crate) enum ViewerState {
     },
     Docx {
         name: String,
-        blocks: Vec<crate::office::Block>,
+        document: crate::office::WordDocument,
     },
     Pptx {
         name: String,
@@ -217,9 +217,9 @@ pub(crate) fn inspect_file(path: &Path) -> ViewerState {
             Err(message) => Err(message),
         },
         "xls" | "xlsx" | "pptx" => Err("This format requires a document session.".into()),
-        "docx" => crate::office::docx(path).map(|blocks| ViewerState::Docx {
+        "docx" => crate::office::docx(path).map(|document| ViewerState::Docx {
             name: name.clone(),
-            blocks,
+            document,
         }),
         _ => return ViewerState::Unsupported { name },
     };
@@ -367,6 +367,12 @@ impl Session {
         }));
         Ok(self.response())
     }
+    pub fn slide_preview(&mut self, index: usize) -> Result<crate::office::Slide, String> {
+        let Adapter::Presentation(presentation) = &mut self.adapter else {
+            return Err("This document is not a presentation.".into());
+        };
+        presentation.slide(index).map(|(_, slide)| slide)
+    }
 }
 
 #[cfg(test)]
@@ -388,6 +394,19 @@ mod tests {
         assert!(!second.capabilities.search && !second.capabilities.worksheets);
         assert!(session.worksheet("other").is_err());
         assert!(session.slide(0).is_err());
+    }
+    #[test]
+    fn slide_previews_do_not_change_the_selected_slide() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/example.pptx");
+        let mut session = Session::new(Some(path));
+        let first = session.open();
+        assert!(matches!(
+            &*first.content,
+            ViewerState::Pptx { index: 0, .. }
+        ));
+        assert!(session.slide_preview(1).is_ok());
+        assert!(session.slide_preview(2).is_err());
+        assert!(Arc::ptr_eq(&first.content, &session.open().content));
     }
 
     #[test]

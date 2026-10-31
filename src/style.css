@@ -2,6 +2,17 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 #app { height: 100vh; display: flex; flex-direction: column; }
+.workspace { flex: 1; min-height: 0; display: flex; }
+.workspace .viewer { min-width: 0; }
+.previews { position: relative; flex: 0 0 160px; overflow-y: auto; padding: 16px; background: #e9ede8; border-right: 1px solid #d6ded7; }
+.previews[hidden] { display: none; }
+.preview { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 128px; margin: 0 0 16px; padding: 0; border: 0; background: transparent; color: #68746d; font-size: 12px; }
+.preview-image { position: relative; display: block; width: 128px; aspect-ratio: 3 / 4; overflow: hidden; background: white; box-shadow: 0 1px 5px #0002; }
+.preview[aria-current] .preview-image { outline: 3px solid #3b6554; outline-offset: 2px; }
+.preview-image canvas { display: block; width: 100%; height: 100%; }
+.preview-image .slide { width: 100%; box-shadow: none; }
+.preview-image .doc-page { position: absolute; top: 0; left: 0; margin: 0; max-width: none; }
+.preview-image .slide-item { font-size: 1.5cqw; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 68px; padding: 0 24px; background: #fff; border-bottom: 1px solid #e2e6df; }
 .brand, .actions { display: flex; align-items: center; gap: 12px; }
 .brand { font-weight: 700; font-size: 15px; letter-spacing: -.02em; }
@@ -41,6 +52,11 @@ p { color: #68746d; margin: 0; font-size: 14px; line-height: 1.6; }
 .pdf-page { background: white; box-shadow: 0 2px 12px #0002; }
 .pdf-page canvas { display: block; }
 .document img { max-width: 100%; height: auto; }
+.document-pages-view { padding: 24px; }
+.doc-pages { display: flex; flex-direction: column; align-items: center; gap: 20px; min-width: max-content; }
+.doc-page { flex: none; max-width: none; margin: 0; overflow: hidden; box-shadow: 0 2px 12px #0002; }
+.doc-source { position: fixed; left: -100000px; top: 0; max-width: none; visibility: hidden; }
+.doc-page img, .doc-source img { max-height: var(--content-height); object-fit: contain; }
 .slide-view { display: grid; place-items: center; padding: 24px; }
 .slide { position: relative; width: min(100%, 1000px); background: white; box-shadow: 0 2px 12px #0002; overflow: hidden; }
 .slide-item { position: absolute; white-space: pre-wrap; overflow: hidden; font-size: clamp(11px, 1.5vw, 22px); }

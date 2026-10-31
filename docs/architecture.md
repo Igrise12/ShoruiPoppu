@@ -112,6 +112,8 @@ Parsing and rendering should continue without blocking the initial window displa
 
 The viewer presents parsed document content; it does not reproduce every behavior of the source application. DOCX layout can differ from Word, especially around fonts, pagination, text boxes, SmartArt, and specialized elements. PPTX support initially focuses on static slides; charts, SmartArt, embedded media, fonts, transitions, and animations may differ from PowerPoint or remain unsupported.
 
+PDF and DOCX pages and PPTX slides have a navigable preview panel. DOCX pages are laid out approximately from parsed content, page dimensions, margins, and explicit page breaks; thumbnails show that same approximation. Preview rendering is local and temporary. Legacy PPT remains unsupported.
+
 Compatibility claims should be based on representative real-world files for each format. Large and image-heavy documents, encrypted files, and damaged files need deliberate handling.
 
 ## Open decisions

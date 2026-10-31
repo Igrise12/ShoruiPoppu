@@ -20,6 +20,13 @@ pub(crate) struct Block {
     children: Vec<Block>,
     style: Option<TextStyle>,
 }
+#[derive(Serialize)]
+pub(crate) struct WordDocument {
+    blocks: Vec<Block>,
+    width: f64,
+    height: f64,
+    margins: [f64; 4],
+}
 #[derive(Clone, Default, Serialize)]
 struct TextStyle {
     bold: bool,
@@ -425,7 +432,9 @@ fn paragraph(
         .filter(|n| n.has_tag_name("r") && !n.ancestors().skip(1).any(|a| a.has_tag_name("r")))
     {
         for child in run.children().filter(|n| n.is_element()) {
-            if child.has_tag_name("t")
+            if child.has_tag_name("br") && attr(child, "type") == Some("page") {
+                children.push(block("page_break", String::new(), None, vec![]));
+            } else if child.has_tag_name("t")
                 || child.has_tag_name("tab")
                 || child.has_tag_name("br")
                 || child.has_tag_name("cr")
@@ -509,7 +518,7 @@ fn paragraph(
     result.style = Some(formatting);
     result
 }
-pub(crate) fn docx(path: &Path) -> Result<Vec<Block>, String> {
+pub(crate) fn docx(path: &Path) -> Result<WordDocument, String> {
     let mut zip = package(path)?;
     let rels = relations(&mut zip, "word/document.xml");
     let contents = xml(&mut zip, "word/document.xml")?;
@@ -523,6 +532,14 @@ pub(crate) fn docx(path: &Path) -> Result<Vec<Block>, String> {
     let mut budget = 32 * 1024 * 1024;
     for node in body.children().filter(|n| n.is_element()) {
         if node.has_tag_name("p") {
+            if node
+                .children()
+                .find(|n| n.has_tag_name("pPr"))
+                .and_then(|p| p.children().find(|n| n.has_tag_name("pageBreakBefore")))
+                .is_some_and(on)
+            {
+                blocks.push(block("page_break", String::new(), None, vec![]));
+            }
             blocks.push(paragraph(
                 node,
                 &rels,
@@ -554,7 +571,30 @@ pub(crate) fn docx(path: &Path) -> Result<Vec<Block>, String> {
             blocks.push(block("table", String::new(), None, rows));
         }
     }
-    Ok(blocks)
+    let section = body.descendants().find(|n| n.has_tag_name("sectPr"));
+    let size = section.and_then(|n| n.children().find(|c| c.has_tag_name("pgSz")));
+    let margin = section.and_then(|n| n.children().find(|c| c.has_tag_name("pgMar")));
+    let dimension = |node: Option<Node<'_, '_>>, name, default: f64| {
+        node.and_then(|n| attr(n, name))
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| (0.0..=28800.0).contains(v))
+            .map(|v| v / 15.0)
+            .unwrap_or(default)
+    };
+    let width = dimension(size, "w", 816.0).max(200.0);
+    let height = dimension(size, "h", 1056.0).max(200.0);
+    let margins = [
+        dimension(margin, "top", 96.0),
+        dimension(margin, "right", 96.0),
+        dimension(margin, "bottom", 96.0),
+        dimension(margin, "left", 96.0),
+    ];
+    Ok(WordDocument {
+        blocks,
+        width,
+        height,
+        margins,
+    })
 }
 fn presentation(zip: &mut Package) -> Result<(Vec<String>, f64, f64), String> {
     let source = "ppt/presentation.xml";
@@ -963,7 +1003,7 @@ mod tests {
             )],
             "docx",
         );
-        let blocks = docx(&path).unwrap();
+        let blocks = docx(&path).unwrap().blocks;
         std::fs::remove_file(path).unwrap();
         assert!(blocks[0].children[0].style.as_ref().unwrap().bold);
         assert_eq!(blocks[0].children[0].text, "Hello");
@@ -971,6 +1011,24 @@ mod tests {
             blocks[1].children[0].children[0].children[0].children[0].text,
             "Cell"
         );
+    }
+    #[test]
+    fn reads_word_page_dimensions_margins_and_explicit_breaks() {
+        let path = fixture(
+            &[(
+                "word/document.xml",
+                r#"<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>Before</w:t><w:br w:type="page"/><w:t>After</w:t></w:r></w:p><w:p><w:pPr><w:pageBreakBefore/></w:pPr><w:r><w:t>Next</w:t></w:r></w:p><w:sectPr><w:pgSz w:w="12000" w:h="15000"/><w:pgMar w:top="900" w:right="1200" w:bottom="1500" w:left="1800"/></w:sectPr></w:body></w:document>"#,
+            )],
+            "docx",
+        );
+        let doc = docx(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(
+            (doc.width, doc.height, doc.margins),
+            (800.0, 1000.0, [60.0, 80.0, 100.0, 120.0])
+        );
+        assert_eq!(doc.blocks[0].children[1].kind, "page_break");
+        assert_eq!(doc.blocks[1].kind, "page_break");
     }
     #[test]
     fn reads_slide_order_and_placement() {
@@ -1074,7 +1132,7 @@ mod tests {
             )],
             "docx",
         );
-        let blocks = docx(&path).unwrap();
+        let blocks = docx(&path).unwrap().blocks;
         std::fs::remove_file(path).unwrap();
         let p = blocks[0].style.as_ref().unwrap();
         assert_eq!(p.align.as_deref(), Some("center"));
@@ -1141,7 +1199,7 @@ mod tests {
             ],
             "docx",
         );
-        let blocks = docx(&path).unwrap();
+        let blocks = docx(&path).unwrap().blocks;
         std::fs::remove_file(path).unwrap();
         assert_eq!(
             blocks[0].style.as_ref().unwrap().marker.as_deref(),

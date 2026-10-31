@@ -191,6 +191,24 @@ async fn slide(
 }
 
 #[tauri::command]
+async fn slide_preview(
+    window: WebviewWindow,
+    state: State<'_, ViewerWindows>,
+    index: usize,
+) -> Result<office::Slide, String> {
+    let session = state.session(window.label())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        session
+            .document
+            .lock()
+            .map_err(|_| "Could not access the document")?
+            .slide_preview(index)
+    })
+    .await
+    .map_err(|_| "Could not load the slide preview".to_string())?
+}
+
+#[tauri::command]
 fn profile_mark(
     window: WebviewWindow,
     state: State<'_, ViewerWindows>,
@@ -251,7 +269,8 @@ fn main() {
             worksheet,
             grid_cells,
             profile_mark,
-            slide
+            slide,
+            slide_preview
         ])
         .on_window_event(|window, event| {
             if matches!(event, WindowEvent::Destroyed) {

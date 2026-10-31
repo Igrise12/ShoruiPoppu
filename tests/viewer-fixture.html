@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="UTF-8"></head><body><div id="app"></div>
+<script>
+const params = new URLSearchParams(location.search); const mode = params.get('mode');
+const style = null; const text = value => ({kind:'text',text:value,image:null,children:[],style});
+const para = value => ({kind:'paragraph',text:'',image:null,children:[text(value)],style});
+const breaker = {kind:'page_break',text:'',image:null,children:[],style};
+const row = value => ({kind:'row',text:'',image:null,children:[{kind:'cell',text:'',image:null,children:[para(value)],style}],style});
+const table = {kind:'table',text:'',image:null,children:Array.from({length:35},(_,i)=>row('ROW_'+i+'_END')),style};
+const long = Array.from({length:200},(_,i)=>`word${i} `).join('');
+const image = {kind:'image',text:'',image:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',children:[],style};
+const longCell = Array.from({length:120},(_,i)=>`cellword${i} `).join('');
+table.children.splice(10, 0, row(longCell));
+const blocks = [para('FIRST '+long), {kind:'paragraph',text:'',image:null,children:[image],style}, {kind:'paragraph',text:'',image:null,children:[text('BEFORE_BREAK'),breaker,text('AFTER_BREAK')],style},table,para('LAST END')];
+const slide = index => ({width:1600,height:900,background:'#fff',items:[{kind:'text',text:'Slide '+(index+1),image:null,fill:null,outline:null,geometry:'rect',rotation:0,flip_h:false,flip_v:false,paragraphs:[],x:5,y:5,width:90,height:80}]});
+const caps={search:true,zoom:true,worksheets:false,slides:true};
+const doc={state:'docx',name:'Test.docx',document:{blocks,width:500,height:400,margins:[35,35,35,35]}};
+const ppt=index=>({state:'pptx',name:'Test.pptx',index,count:3,slide:slide(index)});
+const large = {...doc, document:{...doc.document, blocks:Array.from({length:300},(_,i)=>para(`Paragraph ${i} `+'readable content '.repeat(6)))}};
+let state=mode.startsWith('pptx')?ppt(0):mode==='docxlarge'?large:doc;
+window.__TAURI_INTERNALS__={invoke:async(cmd,args)=>{
+ if(cmd==='viewer_state') {if(mode==='pdf') state={state:'pdf',name:'Test.pdf',bytes:Array.from(new Uint8Array(await (await fetch('/src-tauri/tests/fixtures/example.pdf')).arrayBuffer()))}; return {content:state,capabilities:caps};}
+ if(cmd==='slide') {await new Promise(resolve=>setTimeout(resolve,50)); state=ppt(args.index); return {content:state,capabilities:caps};}
+ if(cmd==='slide_preview') {if(mode==='pptxfail' && args.index===1) throw new Error('Preview failed'); return slide(args.index);}
+ return null;
+}};
+</script><script type="module" src="/src/main.ts"></script></body></html>

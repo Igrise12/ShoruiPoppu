@@ -19,7 +19,7 @@ type ViewerState =
   | { state: "text"; name: string; text: string }
   | { state: "grid"; name: string; sheets: string[]; sheet: string; rows: string[][]; row_offset: number; column_offset: number }
   | { state: "workbook"; name: string; sheets: string[]; sheet: string; row_offset: number; column_offset: number; row_count: number; column_count: number; complete: boolean }
-  | { state: "docx"; name: string; blocks: Block[] }
+  | { state: "docx"; name: string; document: { blocks: Block[]; width: number; height: number; margins: [number, number, number, number] } }
   | { state: "pptx"; name: string; index: number; count: number; slide: Slide }
   | { state: "unsupported"; name: string }
   | { state: "error"; name: string; message: string };
@@ -30,9 +30,10 @@ type GridCell = { row: number; column: number; value: string };
 type GridSnapshot = { cells: GridCell[]; row_offset: number; column_offset: number; row_count: number; column_count: number; complete: boolean; error: string | null };
 
 const app = document.querySelector<HTMLElement>("#app")!;
-app.innerHTML = `<header class="toolbar"><div class="brand"><span class="mark" aria-hidden="true">S</span><span>ShoruiPoppu</span></div><div class="actions"><span id="filename"></span><button id="open" type="button">Open file</button><button id="close" class="close" type="button" aria-label="Close window" title="Close window">×</button></div></header><div id="controls" class="controls" hidden></div><main class="viewer" tabindex="0" aria-label="Document content" aria-live="polite" aria-busy="true"><div class="message"><h1>Opening file…</h1><p>Please wait.</p></div></main>`;
+app.innerHTML = `<header class="toolbar"><div class="brand"><span class="mark" aria-hidden="true">S</span><span>ShoruiPoppu</span></div><div class="actions"><span id="filename"></span><button id="open" type="button">Open file</button><button id="close" class="close" type="button" aria-label="Close window" title="Close window">×</button></div></header><div id="controls" class="controls" hidden></div><div class="workspace"><aside class="previews" aria-label="Page previews" hidden></aside><main class="viewer" tabindex="0" aria-label="Document content" aria-live="polite" aria-busy="true"><div class="message"><h1>Opening file…</h1><p>Please wait.</p></div></main></div>`;
 const viewer = app.querySelector<HTMLElement>(".viewer")!;
 const controls = app.querySelector<HTMLElement>("#controls")!;
+const previews = app.querySelector<HTMLElement>(".previews")!;
 const filename = app.querySelector<HTMLElement>("#filename")!;
 let cleanup = () => {};
 let contentReported = false;
@@ -172,6 +173,146 @@ function renderWorkbook(state: Extract<ViewerState, { state: "workbook" }>, capa
   cleanup = () => { disposed = true; requestId++; clearTimeout(timer); clearTimeout(scanTimer); resize.disconnect(); viewer.removeEventListener("scroll", schedule); };
   void draw();
 }
+async function renderDocx(state: Extract<ViewerState, { state: "docx" }>) {
+  viewer.className = "viewer document-pages-view";
+  const { blocks, width, height, margins } = state.document;
+  const padding = margins.map((value, i) => Math.min(value, (i % 2 ? width : height) * .4));
+  const create = (block: Block): HTMLElement => {
+    const tags: Record<string, string> = { paragraph: "p", h1: "h1", h2: "h2", h3: "h3", table: "table", row: "tr", cell: "td", text: "span", image: "img", page_break: "span" };
+    const element = document.createElement(tags[block.kind] || "span");
+    if (block.kind === "page_break") element.dataset.pageBreak = "true";
+    else if (element instanceof HTMLImageElement && block.image?.startsWith("data:image/")) { element.src = block.image; element.alt = "Embedded document image"; }
+    else { element.textContent = block.text; for (const child of block.children) element.append(create(child)); }
+    applyTextStyle(element, block.style);
+    if (block.style?.marker) { const marker = document.createElement("span"); marker.className = "doc-list-marker"; marker.textContent = block.style.marker; element.prepend(marker); }
+    return element;
+  };
+  const pages = document.createElement("div"); pages.className = "doc-pages";
+  const source = document.createElement("article"); source.className = "document doc-source";
+  source.style.width = `${width}px`; source.style.padding = padding.map(v => `${v}px`).join(" ");
+  source.style.setProperty("--content-height", `${height - padding[0] - padding[2]}px`);
+  source.append(...blocks.map(create)); viewer.replaceChildren(pages, source);
+  let disposed = false; let panel: ReturnType<typeof previewPanel> | undefined;
+  const updatePage = () => {
+    const top = viewer.getBoundingClientRect().top;
+    const pageList = Array.from(pages.children) as HTMLElement[];
+    let index = pageList.findIndex(page => page.getBoundingClientRect().bottom > top);
+    if (index < 0) index = pageList.length - 1;
+    if (index >= 0) panel?.select(index);
+  };
+  viewer.addEventListener("scroll", updatePage);
+  cleanup = () => { disposed = true; panel?.dispose(); viewer.removeEventListener("scroll", updatePage); };
+  await Promise.all([document.fonts.ready, ...Array.from(source.querySelectorAll("img"), image => image.decode().catch(() => {}))]);
+  if (disposed) return;
+  do {
+    const page = document.createElement("article"); page.className = "document doc-page";
+    page.style.width = `${width}px`; page.style.height = `${height}px`;
+    page.style.padding = padding.map(v => `${v}px`).join(" ");
+    page.style.setProperty("--content-height", `${height - padding[0] - padding[2]}px`);
+    pages.append(page);
+    const limit = source.getBoundingClientRect().top + height - padding[2];
+    const range = document.createRange(); range.setStart(source, 0); range.setEnd(source, 0);
+    const walker = document.createTreeWalker(source, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    let node: Node | null; let hasEnd = false; let pageBreak: Element | null = null;
+    while ((node = walker.nextNode())) {
+      if (node instanceof HTMLElement && node.dataset.pageBreak) { pageBreak = node; range.setEndBefore(node); hasEnd = true; break; }
+      const text = node.nodeType === Node.TEXT_NODE;
+      const atomic = node instanceof HTMLImageElement || (node instanceof HTMLElement && (node.tagName === "BR" || (!node.hasChildNodes() && node.tagName !== "SPAN")));
+      if (!text && !atomic) continue;
+      if (text && !node.textContent?.length) continue;
+      const candidate = range.cloneRange();
+      if (text) candidate.setEnd(node, node.textContent!.length); else candidate.setEndAfter(node);
+      if (candidate.getBoundingClientRect().bottom <= limit) { range.setEnd(candidate.endContainer, candidate.endOffset); hasEnd = true; continue; }
+      if (text) {
+        let low = 0; let high = node.textContent!.length;
+        while (low < high) {
+          const mid = Math.ceil((low + high) / 2); candidate.setEnd(node, mid);
+          if (candidate.getBoundingClientRect().bottom <= limit) low = mid; else high = mid - 1;
+        }
+        if (low > 0) {
+          if (low < node.textContent!.length && /[\uD800-\uDBFF]/.test(node.textContent![low - 1])) low--;
+          if (low) { range.setEnd(node, low); hasEnd = true; }
+        }
+      }
+      if (!hasEnd) { if (text) range.setEnd(node, node.textContent!.length); else range.setEndAfter(node); hasEnd = true; }
+      break;
+    }
+    if (hasEnd) page.append(range.extractContents());
+    if (pageBreak) pageBreak.remove();
+    if (!hasEnd) { page.append(...Array.from(source.childNodes)); }
+    // Range extraction can leave empty table and paragraph wrappers behind.
+    if (!source.textContent && !source.querySelector("img, [data-page-break]")) source.replaceChildren();
+    if (pages.childElementCount === 1) firstContent();
+    if (pages.childElementCount % 8 === 0) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    if (disposed) return;
+  } while (source.childNodes.length);
+  source.remove();
+  const pageList = Array.from(pages.children) as HTMLElement[];
+  panel = previewPanel(pageList.length, "Page", index => pageList[index].scrollIntoView({ block: "start" }), (index, box) => {
+    box.style.aspectRatio = `${width} / ${height}`;
+    const copy = pageList[index].cloneNode(true) as HTMLElement;
+    copy.setAttribute("aria-hidden", "true"); copy.style.transform = `scale(${128 / width})`; copy.style.transformOrigin = "top left";
+    box.replaceChildren(copy);
+  });
+  updatePage();
+}
+
+function previewPanel(count: number, label: string, select: (index: number) => void,
+  load: (index: number, box: HTMLElement) => void, unload: (index: number) => void = () => {}) {
+  previews.hidden = false;
+  const entries: HTMLButtonElement[] = [];
+  const observer = new IntersectionObserver(changes => {
+    for (const change of changes) {
+      const entry = change.target as HTMLButtonElement;
+      const index = Number(entry.dataset.index);
+      const box = entry.querySelector<HTMLElement>(".preview-image")!;
+      if (change.isIntersecting) load(index, box);
+      else { unload(index); box.replaceChildren(); }
+    }
+  }, { root: previews, rootMargin: "200px" });
+  for (let index = 0; index < count; index++) {
+    const entry = button("", () => select(index)); entry.className = "preview";
+    entry.dataset.index = String(index); entry.setAttribute("aria-label", `${label} ${index + 1}`);
+    const box = document.createElement("span"); box.className = "preview-image";
+    const number = document.createElement("span"); number.textContent = String(index + 1);
+    entry.append(box, number); previews.append(entry); entries.push(entry); observer.observe(entry);
+  }
+  return {
+    select(index: number) {
+      entries.forEach((entry, i) => { if (i === index) entry.setAttribute("aria-current", "true"); else entry.removeAttribute("aria-current"); });
+      const entry = entries[index]; if (!entry) return;
+      if (entry.offsetTop < previews.scrollTop) previews.scrollTop = entry.offsetTop;
+      else if (entry.offsetTop + entry.offsetHeight > previews.scrollTop + previews.clientHeight) previews.scrollTop = entry.offsetTop + entry.offsetHeight - previews.clientHeight;
+    },
+    dispose() { observer.disconnect(); entries.forEach((_, index) => unload(index)); }
+  };
+}
+
+function slideSurface(slide: Slide): HTMLElement {
+      const surface = document.createElement("div"); surface.className = "slide"; surface.style.aspectRatio = `${slide.width} / ${slide.height}`;
+      if (slide.background) surface.style.backgroundColor = slide.background;
+      for (const item of slide.items) {
+        const el = document.createElement(item.image ? "img" : "div"); el.className = "slide-item";
+        if (item.fill) el.style.backgroundColor = item.fill;
+        if (item.outline) el.style.border = `1px solid ${item.outline}`;
+        if (item.geometry === "ellipse") el.style.borderRadius = "50%";
+        if (item.geometry === "roundRect") el.style.borderRadius = "12%";
+        if (item.rotation || item.flip_h || item.flip_v) el.style.transform = `rotate(${item.rotation}deg) scale(${item.flip_h ? -1 : 1}, ${item.flip_v ? -1 : 1})`;
+        el.style.left = `${item.x}%`; el.style.top = `${item.y}%`; el.style.width = `${item.width}%`; el.style.height = `${item.height}%`;
+        if (el instanceof HTMLImageElement && item.image?.startsWith("data:image/")) { el.src = item.image; el.alt = "Slide image"; }
+        else if (item.paragraphs.length) {
+          for (const paragraph of item.paragraphs) {
+            const p = document.createElement("p"); p.className = "slide-paragraph";
+            if (paragraph.align && ["left", "right", "center", "justify"].includes(paragraph.align)) p.style.textAlign = paragraph.align;
+            if (paragraph.marker) { p.style.paddingLeft = `${paragraph.level * 1.25}em`; p.append(document.createTextNode(`${paragraph.marker} `)); }
+            for (const run of paragraph.runs) { const span = document.createElement("span"); span.textContent = run.text; applyTextStyle(span, run.style, slide.width); p.append(span); }
+            el.append(p);
+          }
+        } else el.textContent = item.text;
+        surface.append(el);
+      }
+  return surface;
+}
 async function renderPdf(state: Extract<ViewerState, { state: "pdf" }>, capabilities: Capabilities) {
   viewer.className = "viewer pdf-view";
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -257,12 +398,32 @@ async function renderPdf(state: Extract<ViewerState, { state: "pdf" }>, capabili
     if (visible) currentPage = Number(visible.dataset.page);
     if (document.activeElement !== pageInput) pageInput.value = String(currentPage);
     previous.disabled = currentPage <= 1; next.disabled = currentPage >= pdf.numPages;
+    panel.select(currentPage - 1);
   };
   const goPage = (page: number) => {
     const holder = holders[page - 1]; if (!holder) return;
     holder.scrollIntoView({ block: "start" });
     currentPage = page; pageInput.value = String(page); updatePage();
   };
+  const thumbnailTasks = new Map<number, RenderTask>();
+  const thumbnailLoads = new Map<number, object>();
+  const panel = previewPanel(pdf.numPages, "Page", index => goPage(index + 1), (index, box) => {
+    const token = {}; thumbnailLoads.set(index, token);
+    void (async () => {
+      try {
+        const page = await pdf.getPage(index + 1);
+        if (thumbnailLoads.get(index) !== token) return;
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: 128 / base.width });
+        const canvas = document.createElement("canvas"); canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+        box.style.aspectRatio = `${viewport.width} / ${viewport.height}`; box.replaceChildren(canvas);
+        const task = page.render({ canvas, canvasContext: canvas.getContext("2d")!, viewport }); thumbnailTasks.set(index, task);
+        await task.promise; if (thumbnailTasks.get(index) === task) thumbnailTasks.delete(index);
+      } catch (error) {
+        if (thumbnailLoads.get(index) === token && !(error instanceof Error && error.name === "RenderingCancelledException")) box.textContent = "Preview unavailable";
+      }
+    })();
+  }, index => { thumbnailLoads.delete(index); thumbnailTasks.get(index)?.cancel(); thumbnailTasks.delete(index); });
   const previous = button("Previous", () => goPage(Math.max(1, currentPage - 1)));
   const next = button("Next", () => goPage(Math.min(pdf.numPages, currentPage + 1)));
   pageInput.addEventListener("change", () => { const page = pdfPage(pageInput.value, pdf.numPages); if (page === null) pageInput.value = String(currentPage); else goPage(page); });
@@ -298,12 +459,12 @@ async function renderPdf(state: Extract<ViewerState, { state: "pdf" }>, capabili
     else if (capabilities.zoom && (event.key === "+" || event.key === "=" || event.key === "-")) { event.preventDefault(); zoom(event.key === "-" ? -.25 : .25); }
   };
   window.addEventListener("keydown", onKey);
-  cleanup = () => { window.removeEventListener("keydown", onKey); viewer.removeEventListener("scroll", updatePage); renderGeneration++; observer?.disconnect(); for (const renderTask of rendering.values()) renderTask.cancel(); rendering.clear(); void task.destroy(); };
+  cleanup = () => { panel.dispose(); window.removeEventListener("keydown", onKey); viewer.removeEventListener("scroll", updatePage); renderGeneration++; observer?.disconnect(); for (const renderTask of rendering.values()) renderTask.cancel(); rendering.clear(); void task.destroy(); };
   await drawPages();
 }
 async function render(response: Response) {
   const { content: state, capabilities } = response;
-  cleanup(); cleanup = () => {}; controls.replaceChildren(); controls.hidden = true; viewer.setAttribute("aria-busy", "false");
+  cleanup(); cleanup = () => {}; previews.replaceChildren(); previews.hidden = true; controls.replaceChildren(); controls.hidden = true; viewer.setAttribute("aria-busy", "false");
   filename.textContent = "name" in state ? state.name : "";
   switch (state.state) {
     case "empty": message("Open a document", "Choose a file to view it in a new window."); break;
@@ -323,51 +484,23 @@ async function render(response: Response) {
       }
       viewer.replaceChildren(article); firstContent(); break;
     }
-    case "docx": {
-      viewer.className = "viewer document-view"; const article = document.createElement("article"); article.className = "document";
-      const create = (block: Block): HTMLElement => {
-        const tags: Record<string, string> = { paragraph: "p", h1: "h1", h2: "h2", h3: "h3", table: "table", row: "tr", cell: "td", bold: "strong", italic: "em", bold_italic: "strong", text: "span", image: "img" };
-        const element = document.createElement(tags[block.kind] || "span");
-        if (element instanceof HTMLImageElement && block.image?.startsWith("data:image/")) { element.src = block.image; element.alt = "Embedded document image"; }
-        else { element.textContent = block.text; for (const child of block.children) element.append(create(child)); }
-        if (block.kind === "bold_italic") element.style.fontStyle = "italic";
-        applyTextStyle(element, block.style);
-        if (block.style?.marker) { const marker = document.createElement("span"); marker.className = "doc-list-marker"; marker.textContent = block.style.marker; element.prepend(marker); }
-        return element;
-      };
-      article.append(...state.blocks.map(create)); viewer.replaceChildren(article); firstContent(); break;
-    }
+    case "docx": await renderDocx(state); break;
     case "pptx": {
       viewer.className = "viewer slide-view";
-      const surface = document.createElement("div"); surface.className = "slide"; surface.style.aspectRatio = `${state.slide.width} / ${state.slide.height}`;
-      if (state.slide.background) surface.style.backgroundColor = state.slide.background;
-      for (const item of state.slide.items) {
-        const el = document.createElement(item.image ? "img" : "div"); el.className = "slide-item";
-        if (item.fill) el.style.backgroundColor = item.fill;
-        if (item.outline) el.style.border = `1px solid ${item.outline}`;
-        if (item.geometry === "ellipse") el.style.borderRadius = "50%";
-        if (item.geometry === "roundRect") el.style.borderRadius = "12%";
-        if (item.rotation || item.flip_h || item.flip_v) el.style.transform = `rotate(${item.rotation}deg) scale(${item.flip_h ? -1 : 1}, ${item.flip_v ? -1 : 1})`;
-        el.style.left = `${item.x}%`; el.style.top = `${item.y}%`; el.style.width = `${item.width}%`; el.style.height = `${item.height}%`;
-        if (el instanceof HTMLImageElement && item.image?.startsWith("data:image/")) { el.src = item.image; el.alt = "Slide image"; }
-        else if (item.paragraphs.length) {
-          for (const paragraph of item.paragraphs) {
-            const p = document.createElement("p"); p.className = "slide-paragraph";
-            if (paragraph.align && ["left", "right", "center", "justify"].includes(paragraph.align)) p.style.textAlign = paragraph.align;
-            if (paragraph.marker) { p.style.paddingLeft = `${paragraph.level * 1.25}em`; p.append(document.createTextNode(`${paragraph.marker} `)); }
-            for (const run of paragraph.runs) { const span = document.createElement("span"); span.textContent = run.text; applyTextStyle(span, run.style, state.slide.width); p.append(span); }
-            el.append(p);
-          }
-        } else el.textContent = item.text;
-        surface.append(el);
-      }
+      const surface = slideSurface(state.slide);
       viewer.replaceChildren(surface); firstContent();
       const counter = document.createElement("span"); counter.className = "status"; counter.setAttribute("aria-live", "polite"); counter.textContent = `Slide ${state.index + 1} of ${state.count}`;
-      let busy = false;
+      let busy = false; let desired = state.index; let disposed = false;
       const go = async (index: number) => {
-        if (busy || index === state.index || index < 0 || index >= state.count) return;
+        if (index < 0 || index >= state.count || (!busy && index === state.index)) return;
+        desired = index;
+        if (busy) return;
         busy = true; prev.disabled = true; next.disabled = true; counter.textContent = "Loading slide…";
-        try { await render(await invoke<Response>("slide", { index })); }
+        try {
+          let target: number; let response: Response;
+          do { target = desired; response = await invoke<Response>("slide", { index: target }); } while (!disposed && target !== desired);
+          if (!disposed) await render(response);
+        }
         catch { counter.textContent = `Could not load slide ${index + 1}`; prev.disabled = state.index === 0; next.disabled = state.index + 1 >= state.count; busy = false; }
       };
       const prev = button("Previous", () => void go(state.index - 1)); prev.disabled = state.index === 0;
@@ -380,8 +513,32 @@ async function render(response: Response) {
         if (index !== null) { event.preventDefault(); void go(index); }
       };
       if (capabilities.slides) {
+        const loads = new Map<number, object>();
+        const queue: { index: number; box: HTMLElement; token: object }[] = [];
+        let loading = false;
+        const loadNext = async () => {
+          if (loading || disposed) return;
+          let item = queue.shift();
+          while (item && loads.get(item.index) !== item.token) item = queue.shift();
+          if (!item) return;
+          loading = true;
+          try {
+            const slide = item.index === state.index ? state.slide : await invoke<Slide>("slide_preview", { index: item.index });
+            if (loads.get(item.index) === item.token && !disposed) {
+              item.box.style.aspectRatio = `${slide.width} / ${slide.height}`;
+              item.box.replaceChildren(slideSurface(slide));
+            }
+          } catch { if (loads.get(item.index) === item.token && !disposed) item.box.textContent = "Preview unavailable"; }
+          loading = false;
+          if (!disposed) setTimeout(() => void loadNext(), 0);
+        };
+        const panel = previewPanel(state.count, "Slide", index => void go(index), (index, box) => {
+          const token = {}; loads.set(index, token);
+          queue.push({ index, box, token }); void loadNext();
+        }, index => { loads.delete(index); });
+        panel.select(state.index);
         controls.append(prev, counter, next); controls.hidden = false;
-        window.addEventListener("keydown", onKey); cleanup = () => window.removeEventListener("keydown", onKey);
+        window.addEventListener("keydown", onKey); cleanup = () => { disposed = true; panel.dispose(); window.removeEventListener("keydown", onKey); };
       } break;
     }
     case "grid": renderGrid(state); firstContent(); break;
